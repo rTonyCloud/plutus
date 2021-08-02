@@ -53,6 +53,7 @@ import qualified PlutusCore                         as PLC
 
 import           Control.Lens
 import           Control.Monad
+import           Control.Monad.Extra                (orM, whenM)
 import           Control.Monad.Reader
 import           Debug.Trace                        (traceM)
 import           PlutusPrelude
@@ -64,46 +65,42 @@ data Pass uni fun =
        , _pass      :: forall m e a b. Compiling m e uni fun a => Term TyName Name uni fun b -> m (Term TyName Name uni fun b)
        }
 
-when' :: Compiling m e uni fun a => Lens' CompilationOpts Bool -> m Bool
-when' coOpt = view (ccOpts . coOpt)
+onOption :: Compiling m e uni fun a => Lens' CompilationOpts Bool -> m Bool
+onOption coOpt = view (ccOpts . coOpt)
+
+isVerbose :: Compiling m e uni fun a => m Bool
+isVerbose = view $ ccOpts . coVerbose
+
+isDebug :: Compiling m e uni fun a => m Bool
+isDebug = view $ ccOpts . coDebug
 
 applyPass :: (Compiling m e uni fun a, b ~ Provenance a) => Pass uni fun -> Term TyName Name uni fun b -> m (Term TyName Name uni fun b)
-applyPass pass term = do
-  isVerbose  <- view (ccOpts . coVerbose)
-  isDebug    <- view (ccOpts . coDebug)
-  isPedantic <- view (ccOpts . coPedantic)
+applyPass pass = runIf (_shouldRun pass) $ \term -> do
   let passName = _name pass
-  when (isVerbose || isDebug) (traceM ("  !!! " ++ passName))
-  when isDebug (do
-                   traceM ("    !!! Before " ++ passName)
-                   traceM (show (pretty term)))
+  whenM (orM [isVerbose, isDebug]) $ traceM ("  !!! " ++ passName)
+  whenM isDebug $ do
+                   traceM $ "    !!! Before " ++ passName
+                   traceM $ show $ pretty term
   term' <- _pass pass term
-  when isDebug (do
-                   traceM ("    !!! After " ++ passName)
-                   traceM (show (pretty term'))
-               )
-  when isPedantic (typeCheckTerm term')
+  whenM isDebug $ do
+                   traceM $ "    !!! After " ++ passName
+                   traceM $ show $ pretty term'
+  check term'
   pure term'
-
-applyPasses :: (Compiling m e uni fun a, b ~ Provenance a) => [Pass uni fun] -> Term TyName Name uni fun b -> m (Term TyName Name uni fun b)
-applyPasses passes = foldl' (>=>) pure (map applyPass passes)
 
 availablePasses :: [Pass uni fun]
 availablePasses =
-    [ Pass "unwrap cancel"        (when' coSimplifierUnwrapCancel)       (pure . Unwrap.unwrapCancel)
-    , Pass "beta"                 (when' coSimplifierBeta)               (pure . Beta.beta)
-    , Pass "inline"               (when' coSimplifierInline)             Inline.inline
-    , Pass "remove dead bindings" (when' coSimplifierRemoveDeadBindings) DeadCode.removeDeadBindings
+    [ Pass "unwrap cancel"        (onOption coSimplifierUnwrapCancel)       (pure . Unwrap.unwrapCancel)
+    , Pass "beta"                 (onOption coSimplifierBeta)               (pure . Beta.beta)
+    , Pass "inline"               (onOption coSimplifierInline)             Inline.inline
+    , Pass "remove dead bindings" (onOption coSimplifierRemoveDeadBindings) DeadCode.removeDeadBindings
     ]
 
 -- | Actual simplifier
 simplify
     :: forall m e uni fun a b. (Compiling m e uni fun a, b ~ Provenance a)
     => Term TyName Name uni fun b -> m (Term TyName Name uni fun b)
-simplify term =
-  do
-    selectedPasses <- filterM _shouldRun availablePasses
-    applyPasses selectedPasses term
+simplify = foldl' (>=>) pure (map applyPass availablePasses)
 
 -- | Perform some simplification of a 'Term'.
 simplifyTerm
@@ -122,10 +119,7 @@ simplifyTerm = runIfOpts $ DeadCode.removeDeadBindings >=> simplify'
         -- generate simplification step
         simplifyStep :: Int -> Term TyName Name uni fun b -> m (Term TyName Name uni fun b)
         simplifyStep i term = do
-          isVerbose <- view (ccOpts . coVerbose)
-          isDebug   <- view (ccOpts . coDebug)
-          -- TODO:  Continue here
-          when (isVerbose || isDebug) (traceM ("!!! simplifier pass " ++ show i))
+          whenM (orM [isVerbose, isDebug]) $ traceM $ "!!! simplifier pass " ++ show i
           simplify term
 
 

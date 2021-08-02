@@ -79,15 +79,15 @@ withEnclosing f = local (over ccEnclosing f)
 
 runIf
   :: MonadReader (CompilationCtx uni fun a) m
-  => Getting Bool (CompilationCtx uni fun a) Bool
+  => m Bool
   -> (b -> m b)
   -> (b -> m b)
-runIf getter pass arg = do
-  doPass <- view getter
+runIf condition pass arg = do
+  doPass <- condition
   if doPass then pass arg else pure arg
 
 runIfOpts :: MonadReader (CompilationCtx uni fun a) m => (b -> m b) -> (b -> m b)
-runIfOpts = runIf (ccOpts . coOptimize)
+runIfOpts = runIf $ view (ccOpts . coOptimize)
 
 type PLCTerm uni fun a = PLC.Term PLC.TyName PLC.Name uni fun (Provenance a)
 type PLCType uni a = PLC.Type PLC.TyName uni (Provenance a)
