@@ -239,10 +239,14 @@ let
             config.hsPkgs.cardano-cli.components.exes.cardano-cli
           ];
           plutus-metatheory.components.tests.test1.build-tools = lib.mkForce [
-            config.hsPkgs.plutus-core.components.exes.plc agdaWithStdlib
+            config.hsPkgs.plutus-core.components.exes.plc
+            config.hsPkgs.plutus-core.components.exes.uplc
+            agdaWithStdlib
           ];
           plutus-metatheory.components.tests.test2.build-tools = lib.mkForce [
-            config.hsPkgs.plutus-core.components.exes.plc agdaWithStdlib
+            config.hsPkgs.plutus-core.components.exes.plc
+            config.hsPkgs.plutus-core.components.exes.uplc
+            agdaWithStdlib
           ];
         };
       })
