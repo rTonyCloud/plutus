@@ -73,6 +73,11 @@ typeCheckTerm t = do
         Just tcconfig -> void . runTypeCheckM tcconfig $ inferTypeM t
         Nothing       -> pure ()
 
+check :: Compiling m e uni fun b => Term TyName Name uni fun (Provenance b) -> m ()
+check arg = do
+    shouldCheck <- view (ccOpts . coParanoidTypechecking)
+    if shouldCheck then typeCheckTerm arg else pure ()
+
 -- | The 1st half of the PIR compiler pipeline up to floating/merging the lets.
 -- We stop momentarily here to give a chance to the tx-plugin
 -- to dump a "readable" version of pir (i.e. floated).
@@ -85,17 +90,28 @@ compileToReadable =
     >=> PLC.rename
     >=> through typeCheckTerm
     >=> simplifyTerm
-    >=> (pure . ThunkRec.thunkRecursions)
     >=> floatTerm
+    >=> through check
 
 -- | The 2nd half of the PIR compiler pipeline.
 -- Compiles a 'Term' into a PLC Term, by removing/translating step-by-step the PIR's language construsts to PLC.
 -- Note: the result *does* have globally unique names.
 compileReadableToPlc :: Compiling m e uni fun a => Term TyName Name uni fun (Provenance a) -> m (PLCTerm uni fun a)
 compileReadableToPlc =
-    NonStrict.compileNonStrictBindings
+    NonStrict.compileNonStrictBindings False
+    >=> through check
+    >=> (pure . ThunkRec.thunkRecursions)
+    >=> through check
+    -- Process only the non-strict bindings created by 'thunkRecursions' with unit delay/forces
+    -- See Note [Using unit versus force/delay]
+    >=> NonStrict.compileNonStrictBindings True
+    >=> through check
     >=> Let.compileLets Let.DataTypes
+    >=> through check
     >=> Let.compileLets Let.RecTerms
+    -- TODO: add 'check' steps from here on. Can't do this since we seem to generate a wrong type
+    -- somewhere in the recursive binding compilation step
+    >=> through check
     -- We introduce some non-recursive let bindings while eliminating recursive let-bindings, so we
     -- can eliminate any of them which are unused here.
     >=> simplifyTerm

@@ -2,10 +2,11 @@
   # 'supportedSystems' restricts the set of systems that we will evaluate for. Useful when you're evaluting
   # on a machine with e.g. no way to build the Darwin IFDs you need!
   supportedSystems ? [ "x86_64-linux" "x86_64-darwin" ]
+, rootsOnly ? false
+, checkMaterialization ? true
 }:
 let
   inherit (import ./nix/lib/ci.nix) dimension platformFilterGeneric filterAttrsOnlyRecursive filterSystems;
-  sources = import ./nix/sources.nix;
   # limit supportedSystems to what the CI can actually build
   # currently that is linux and darwin.
   systems = filterSystems supportedSystems;
@@ -52,21 +53,19 @@ let
       # given a system ("x86_64-linux") return an attrset of derivations to build
       _select = _: system: crossSystem:
         let
-          packages = import ./default.nix { inherit system crossSystem; checkMaterialization = true; };
-          # haskell.nix bug. If we set checkMaterialization, plan-nix.json doesn't exist on project.
-          packages2 = import ./default.nix { inherit system crossSystem; };
+          packages = import ./default.nix { inherit system crossSystem checkMaterialization; };
           nativePackages = import ./default.nix { inherit system; };
-
           pkgs = packages.pkgs;
           plutus = packages.plutus;
           isBuildable = platformFilterGeneric pkgs (if crossSystem == null then system else crossSystem.config);
         in
         filterAttrsOnlyRecursive (_: drv: isBuildable drv) ({
-          # build relevant top level attributes from default.nix
-          inherit (packages) docs tests plutus-playground marlowe-playground marlowe-dashboard marlowe-dashboard-fake-pab plutus-pab plutus-use-cases deployment;
           # The haskell.nix IFD roots for the Haskell project. We include these so they won't be GCd and will be in the
           # cache for users
           inherit (plutus.haskell.project) roots;
+        } // pkgs.lib.optionalAttrs (!rootsOnly) {
+          # build relevant top level attributes from default.nix
+          inherit (packages) docs tests plutus-playground marlowe-playground marlowe-dashboard marlowe-dashboard-fake-pab plutus-pab plutus-use-cases deployment;
 
           # build all haskell packages and tests
           haskell = pkgs.recurseIntoAttrs (mkHaskellDimension pkgs plutus.haskell.projectPackages);

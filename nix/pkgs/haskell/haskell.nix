@@ -10,6 +10,7 @@
 , gitignore-nix
 , z3
 , R
+, libsodium-vrf
 , checkMaterialization
 , compiler-nix-name
 , enableHaskellProfiling
@@ -53,7 +54,7 @@ let
       "https://github.com/input-output-hk/goblins"."cde90a2b27f79187ca8310b6549331e59595e7ba" = "17c88rbva3iw82yg9srlxjv2ia5wjb9cyqw44hik565f5v9svnyg";
       "https://github.com/input-output-hk/iohk-monitoring-framework"."34abfb7f4f5610cabb45396e0496472446a0b2ca" = "1fdc0a02ipa385dnwa6r6jyc8jlg537i12hflfglkhjs2b7i92gs";
       "https://github.com/input-output-hk/ouroboros-network"."e338f2cf8e1078fbda9555dd2b169c6737ef6774" = "12x81hpjyw2cpkazfalz6bw2wgr6ax7bnmlxl2rlfakkvsjfgaqd";
-      "https://github.com/input-output-hk/cardano-node.git"."f3ef4ed72894499160f2330b91572a159005c148" = "1mp8ih6kmq4j354mgjgrxlssv7jbk5zz1j3nyqg43ascql4d0fvq";
+      "https://github.com/input-output-hk/cardano-node.git"."f72c6272eb58a43cd1d2ef4f4381f3822b3c60c6" = "13q312z7q4avnkk0i5jl9g4idskdz3azq9xgm447ld8mwcvchdha";
       "https://github.com/input-output-hk/Win32-network"."94153b676617f8f33abe8d8182c37377d2784bd1" = "0pb7bg0936fldaa5r08nqbxvi2g8pcy4w3c7kdcg7pdgmimr30ss";
       "https://github.com/input-output-hk/hedgehog-extras"."8bcd3c9dc22cc44f9fcfe161f4638a384fc7a187" = "12viwpahjdfvlqpnzdgjp40nw31rvyznnab1hml9afpaxd6ixh70";
     };
@@ -129,11 +130,6 @@ let
         # TODO fix nix-tools so this is automatic
         packages.marlowe.components.tests.marlowe-test.buildable = lib.mkForce false;
         packages.prettyprinter-configurable.components.tests.prettyprinter-configurable-test.buildable = lib.mkForce false;
-      })
-      ({ lib, pkgs, ... }: {
-        # Use our forked libsodium from iohk-nix crypto overlay.
-        packages.cardano-crypto-praos.components.library.pkgconfig = lib.mkForce [ [ pkgs.libsodium-vrf ] ];
-        packages.cardano-crypto-class.components.library.pkgconfig = lib.mkForce [ [ pkgs.libsodium-vrf ] ];
       })
       ({ pkgs, ... }: lib.mkIf (pkgs.stdenv.hostPlatform != pkgs.stdenv.buildPlatform) {
         # Remove hsc2hs build-tool dependencies (suitable version will be available as part of the ghc derivation)
@@ -243,14 +239,13 @@ let
 
           inline-r.ghcOptions = [ "-XStandaloneKindSignatures" ];
 
-          # Haddock doesn't work for some reason
-          eventful-sql-common.doHaddock = false;
-          # Needs some extra options to work with newer persistent
-          eventful-sql-common.ghcOptions = [ "-XDerivingStrategies -XStandaloneDeriving -XUndecidableInstances -XDataKinds -XFlexibleInstances -XMultiParamTypeClasses" ];
-
           # Honestly not sure why we need this, it has a mysterious unused dependency on "m"
           # This will go away when we upgrade nixpkgs and things use ieee754 anyway.
           ieee.components.library.libs = lib.mkForce [ ];
+
+          # See https://github.com/input-output-hk/iohk-nix/pull/488
+          cardano-crypto-praos.components.library.pkgconfig = lib.mkForce [ [ libsodium-vrf ] ];
+          cardano-crypto-class.components.library.pkgconfig = lib.mkForce [ [ libsodium-vrf ] ];
 
           # By default haskell.nix chooses the `buildPackages` versions of these `build-tool-depeends`, but
           # when cross compiling we want the cross compiled version.

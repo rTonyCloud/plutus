@@ -56,7 +56,7 @@ module Plutus.PAB.Core
     , instanceState
     , observableState
     , waitForState
-    , waitForTxConfirmed
+    , waitForTxStatusChange
     , activeEndpoints
     , waitForEndpoint
     , currentSlot
@@ -103,7 +103,7 @@ import           Data.Text                               (Text)
 import           Ledger.Tx                               (Address, Tx)
 import           Ledger.TxId                             (TxId)
 import           Ledger.Value                            (Value)
-import           Plutus.Contract.Effects                 (ActiveEndpoint (..), PABReq, TxConfirmed)
+import           Plutus.Contract.Effects                 (ActiveEndpoint (..), PABReq, TxStatus (Unknown))
 import           Plutus.PAB.Core.ContractInstance        (ContractInstanceMsg, ContractInstanceState)
 import qualified Plutus.PAB.Core.ContractInstance        as ContractInstance
 import           Plutus.PAB.Core.ContractInstance.STM    (Activity (Active), BlockchainEnv, InstancesState,
@@ -112,7 +112,6 @@ import qualified Plutus.PAB.Core.ContractInstance.STM    as Instances
 import           Plutus.PAB.Effects.Contract             (ContractDefinition, ContractEffect, ContractStore,
                                                           PABContract (..), getState)
 import qualified Plutus.PAB.Effects.Contract             as Contract
-import qualified Plutus.PAB.Effects.ContractRuntime      as ContractRuntime
 import           Plutus.PAB.Effects.TimeEffect           (TimeEffect (..), systemTime)
 import           Plutus.PAB.Effects.UUID                 (UUIDEffect, handleUUIDEffect)
 import           Plutus.PAB.Events.ContractInstanceState (PartiallyDecodedResponse, fromResp)
@@ -123,8 +122,7 @@ import           Plutus.PAB.Types                        (PABError (ContractInst
 import           Plutus.PAB.Webserver.Types              (ContractActivationArgs (..))
 import           Wallet.API                              (PubKey, Slot)
 import qualified Wallet.API                              as WAPI
-import           Wallet.Effects                          (ChainIndexEffect, ContractRuntimeEffect, NodeClientEffect,
-                                                          WalletEffect)
+import           Wallet.Effects                          (ChainIndexEffect, NodeClientEffect, WalletEffect)
 import           Wallet.Emulator.LogMessages             (RequestHandlerLogMsg, TxBalanceMsg)
 import           Wallet.Emulator.MultiAgent              (EmulatorEvent' (..), EmulatorTimeEvent (..))
 import           Wallet.Emulator.Wallet                  (Wallet, WalletEvent (..))
@@ -303,8 +301,7 @@ payToPublicKey source target amount =
 
 -- | Effects available to contract instances with access to external services.
 type ContractInstanceEffects t env effs =
-    ContractRuntimeEffect
-    ': ContractEffect t
+    ContractEffect t
     ': ContractStore t
     ': WalletEffect
     ': ChainIndexEffect
@@ -349,8 +346,7 @@ handleAgentThread wallet action = do
         $ handleUUIDEffect
         $ handleServicesEffects wallet
         $ handleContractStoreEffect
-        $ handleContractEffect
-        $ (handleContractRuntimeMsg @t . reinterpret @ContractRuntimeEffect @(LogMsg ContractRuntime.ContractRuntimeMsg) ContractRuntime.handleContractRuntime) action'
+        $ handleContractEffect action'
 
 -- | Effect handlers for running the PAB.
 data EffectHandlers t env =
@@ -451,9 +447,6 @@ timed = \case
             pure (EmulatorTimeEvent sl msg)
         send (LMessage m')
 
-handleContractRuntimeMsg :: forall t x effs. Member (LogMsg (PABMultiAgentMsg t)) effs => Eff (LogMsg ContractRuntime.ContractRuntimeMsg ': effs) x -> Eff effs x
-handleContractRuntimeMsg = interpret (mapLog @_ @(PABMultiAgentMsg t) RuntimeLog)
-
 -- | Get the current state of the contract instance.
 instanceState :: forall t env. Wallet -> ContractInstanceId -> PABAction t env (Contract.State t)
 instanceState wallet instanceId = handleAgentThread wallet (Contract.getState @t instanceId)
@@ -473,10 +466,10 @@ waitForState extract instanceId = do
         maybe STM.retry pure (extract state)
 
 -- | Wait for the transaction to be confirmed on the blockchain.
-waitForTxConfirmed :: forall t env. TxId -> PABAction t env TxConfirmed
-waitForTxConfirmed t = do
+waitForTxStatusChange :: forall t env. TxId -> PABAction t env TxStatus
+waitForTxStatusChange t = do
     env <- asks @(PABEnvironment t env) blockchainEnv
-    liftIO $ STM.atomically $ Instances.waitForTxConfirmed t env
+    liftIO $ STM.atomically $ Instances.waitForTxStatusChange Unknown t env
 
 -- | The list of endpoints that are currently open
 activeEndpoints :: forall t env. ContractInstanceId -> PABAction t env (STM [OpenEndpoint])

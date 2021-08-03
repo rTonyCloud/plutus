@@ -99,6 +99,7 @@ data DefaultFun
     | Nop1
     | Nop2
     | Nop3
+    | Blake2b_256
     deriving (Show, Eq, Ord, Enum, Bounded, Generic, NFData, Hashable, Ix, PrettyBy PrettyConfigPlc)
 
 instance Pretty DefaultFun where
@@ -157,7 +158,7 @@ instance uni ~ DefaultUni => ToBuiltinMeaning uni DefaultFun where
     toBuiltinMeaning LessThanEqualsInteger =
         makeBuiltinMeaning
             ((<=) @Integer)
-            (runCostingFunTwoArguments . paramLessThanEqInteger)
+            (runCostingFunTwoArguments . paramLessThanEqualsInteger)
     toBuiltinMeaning GreaterThanInteger =
         makeBuiltinMeaning
             ((>) @Integer)
@@ -165,11 +166,11 @@ instance uni ~ DefaultUni => ToBuiltinMeaning uni DefaultFun where
     toBuiltinMeaning GreaterThanEqualsInteger =
         makeBuiltinMeaning
             ((>=) @Integer)
-            (runCostingFunTwoArguments . paramGreaterThanEqInteger)
+            (runCostingFunTwoArguments . paramGreaterThanEqualsInteger)
     toBuiltinMeaning EqualsInteger =
         makeBuiltinMeaning
             ((==) @Integer)
-            (runCostingFunTwoArguments . paramEqInteger)
+            (runCostingFunTwoArguments . paramEqualsInteger)
     toBuiltinMeaning Concatenate =
         makeBuiltinMeaning
             BS.append
@@ -185,11 +186,15 @@ instance uni ~ DefaultUni => ToBuiltinMeaning uni DefaultFun where
     toBuiltinMeaning Sha2_256 =
         makeBuiltinMeaning
             Hash.sha2
-            (runCostingFunOneArgument . paramSHA2)
+            (runCostingFunOneArgument . paramSha2_256)
     toBuiltinMeaning Sha3_256 =
         makeBuiltinMeaning
             Hash.sha3
-            (runCostingFunOneArgument . paramSHA3)
+            (runCostingFunOneArgument . paramSha3_256)
+    toBuiltinMeaning Blake2b_256 =
+        makeBuiltinMeaning
+            Hash.blake2b
+            mempty -- TODO: budget. To be replace with: (runCostingFunOneArgument . paramBlake2b)
     toBuiltinMeaning VerifySignature =
         makeBuiltinMeaning
             (verifySignature @EvaluationResult)
@@ -197,15 +202,15 @@ instance uni ~ DefaultUni => ToBuiltinMeaning uni DefaultFun where
     toBuiltinMeaning EqualsByteString =
         makeBuiltinMeaning
             ((==) @BS.ByteString)
-            (runCostingFunTwoArguments . paramEqByteString)
+            (runCostingFunTwoArguments . paramEqualsByteString)
     toBuiltinMeaning LessThanByteString =
         makeBuiltinMeaning
             ((<) @BS.ByteString)
-            (runCostingFunTwoArguments . paramLtByteString)
+            (runCostingFunTwoArguments . paramLessThanByteString)
     toBuiltinMeaning GreaterThanByteString =
         makeBuiltinMeaning
             ((>) @BS.ByteString)
-            (runCostingFunTwoArguments . paramGtByteString)
+            (runCostingFunTwoArguments . paramGreaterThanByteString)
     toBuiltinMeaning IfThenElse =
        makeBuiltinMeaning
             (\b x y -> if b then x else y)
@@ -271,10 +276,10 @@ instance uni ~ DefaultUni => ToBuiltinMeaning uni DefaultFun where
             _ : xs' -> EvaluationSuccess . SomeConstantOfArg uniA $ SomeConstantOfRes uniListA xs'
             _       -> EvaluationFailure
     toBuiltinMeaning ChooseList = makeBuiltinMeaning choosePlc mempty where
-        choosePlc :: Opaque term b -> Opaque term b -> SomeConstantOf uni [] '[a] -> EvaluationResult (Opaque term b)
-        choosePlc a b (SomeConstantOfArg _ (SomeConstantOfRes _ xs)) = case xs of
-            []    -> EvaluationSuccess a
-            _ : _ -> EvaluationSuccess b
+        choosePlc :: SomeConstantOf uni [] '[a] -> Opaque term b -> Opaque term b -> Opaque term b
+        choosePlc (SomeConstantOfArg _ (SomeConstantOfRes _ xs)) a b = case xs of
+            []    -> a
+            _ : _ -> b
     toBuiltinMeaning ConstrData =
         makeBuiltinMeaning
             Constr
@@ -331,7 +336,7 @@ instance uni ~ DefaultUni => ToBuiltinMeaning uni DefaultFun where
             mempty
     toBuiltinMeaning ChooseData =
         makeBuiltinMeaning
-            (\xConstr xMap xList xI xB -> \case
+            (\d xConstr xMap xList xI xB -> case d of
                 Constr {} -> xConstr
                 Map    {} -> xMap
                 List   {} -> xList
@@ -418,13 +423,13 @@ instance Flat DefaultFun where
               IfThenElse               -> 21
               CharToString             -> 22
               Append                   -> 23
-              EqualsString             -> 28
-              EncodeUtf8               -> 29
-              DecodeUtf8               -> 30
               Trace                    -> 24
               Nop1                     -> 25
               Nop2                     -> 26
               Nop3                     -> 27
+              EqualsString             -> 28
+              EncodeUtf8               -> 29
+              DecodeUtf8               -> 30
               FstPair                  -> 31
               SndPair                  -> 32
               NullList                 -> 33
@@ -448,6 +453,7 @@ instance Flat DefaultFun where
               MkNilPairData            -> 51
               MkCons                   -> 52
               ChooseList               -> 53
+              Blake2b_256              -> 54
 
     decode = go =<< decodeBuiltin
         where go 0  = pure AddInteger
@@ -474,13 +480,13 @@ instance Flat DefaultFun where
               go 21 = pure IfThenElse
               go 22 = pure CharToString
               go 23 = pure Append
-              go 28 = pure EqualsString
-              go 29 = pure EncodeUtf8
-              go 30 = pure DecodeUtf8
               go 24 = pure Trace
               go 25 = pure Nop1
               go 26 = pure Nop2
               go 27 = pure Nop3
+              go 28 = pure EqualsString
+              go 29 = pure EncodeUtf8
+              go 30 = pure DecodeUtf8
               go 31 = pure FstPair
               go 32 = pure SndPair
               go 33 = pure NullList
@@ -504,6 +510,7 @@ instance Flat DefaultFun where
               go 51 = pure MkNilPairData
               go 52 = pure MkCons
               go 53 = pure ChooseList
+              go 54 = pure Blake2b_256
               go _  = fail "Failed to decode BuiltinName"
 
     size _ n = n + builtinTagWidth

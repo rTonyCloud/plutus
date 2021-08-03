@@ -30,7 +30,7 @@ let
       mscSocketPath = "/tmp/node-server.sock";
       mscRandomTxInterval = 20000000;
       mscSlotConfig = {
-        scZeroSlotTime = cfg.zeroSlotTime;
+        scSlotZeroTime = cfg.slotZeroTime;
         scSlotLength = cfg.slotLength;
       };
       mscFeeConfig = {
@@ -41,10 +41,6 @@ let
       };
       mscNetworkId = ""; # Empty string for Mainnet. Put a network magic number in the string to use the Testnet.
       mscKeptBlocks = 100000;
-      mscBlockReaper = {
-        brcInterval = 6000000;
-        brcBlocksToKeep = 100000;
-      };
       mscInitialTxWallets = [
         { getWallet = 1; }
         { getWallet = 2; }
@@ -172,7 +168,7 @@ in
       '';
     };
 
-    zeroSlotTime = mkOption {
+    slotZeroTime = mkOption {
       type = types.int;
       default = 1596059091000; # POSIX time of 2020-07-29T21:44:51Z (Wednesday, July 29, 2020 21:44:51) - Shelley launch time
       description = ''
@@ -223,7 +219,7 @@ in
           rm -rf ${cfg.dbFile}
 
           echo "[pab-init-cmd]: Creating new DB '${cfg.dbFile}'"
-          ${cfg.pab-setup}/bin/plutus-pab-setup migrate ${cfg.dbFile}
+          ${cfg.pab-package}/bin/plutus-pab-examples --config=${pabYaml} migrate;
         '';
       in
       {

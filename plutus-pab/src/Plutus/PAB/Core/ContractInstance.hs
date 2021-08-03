@@ -45,7 +45,7 @@ import           Data.Proxy                                       (Proxy (..))
 import qualified Data.Text                                        as Text
 
 import           Plutus.Contract.Effects                          (ActiveEndpoint (..), PABReq (..), PABResp (..),
-                                                                   TxConfirmed (..))
+                                                                   TxStatus (Unknown))
 import qualified Plutus.Contract.Effects                          as Contract.Effects
 import           Plutus.Contract.Resumable                        (Request (..), Response (..))
 import           Plutus.Contract.State                            (ContractResponse (..), State (..))
@@ -54,8 +54,7 @@ import           Plutus.Contract.Trace.RequestHandler             (RequestHandle
                                                                    maybeToHandler, tryHandler', wrapHandler)
 import           Plutus.PAB.Core.ContractInstance.RequestHandlers (ContractInstanceMsg (..))
 
-import           Wallet.Effects                                   (ChainIndexEffect, ContractRuntimeEffect,
-                                                                   NodeClientEffect, WalletEffect)
+import           Wallet.Effects                                   (ChainIndexEffect, NodeClientEffect, WalletEffect)
 import           Wallet.Emulator.LogMessages                      (TxBalanceMsg)
 
 import           Plutus.Contract                                  (AddressChangeRequest (..))
@@ -148,18 +147,18 @@ processAwaitSlotRequestsSTM =
     maybeToHandler (extract Contract.Effects._AwaitSlotReq)
     >>> (RequestHandler $ \targetSlot_ -> fmap AwaitSlotResp . InstanceState.awaitSlot targetSlot_ <$> ask)
 
-processTxConfirmedRequestsSTM ::
+processTxStatusChangeRequestsSTM ::
     forall effs.
     ( Member (Reader BlockchainEnv) effs
     )
     => RequestHandler effs PABReq (STM PABResp)
-processTxConfirmedRequestsSTM =
-    maybeToHandler (extract Contract.Effects._AwaitTxConfirmedReq)
+processTxStatusChangeRequestsSTM =
+    maybeToHandler (extract Contract.Effects._AwaitTxStatusChangeReq)
     >>> RequestHandler handler
     where
-        handler req = do
+        handler txId = do
             env <- ask
-            pure (AwaitTxConfirmedResp . unTxConfirmed <$> InstanceState.waitForTxConfirmed req env)
+            pure (AwaitTxStatusChangeResp txId <$> InstanceState.waitForTxStatusChange Unknown txId env)
 
 processEndpointRequestsSTM ::
     forall effs.
@@ -191,7 +190,6 @@ stmRequestHandler = fmap sequence (wrapHandler (fmap pure nonBlockingRequests) <
         <> RequestHandler.handleUtxoQueries @effs
         <> RequestHandler.handleUnbalancedTransactions @effs
         <> RequestHandler.handlePendingTransactions @effs
-        <> RequestHandler.handleTxConfirmedQueries @effs
         <> RequestHandler.handleOwnInstanceIdQueries @effs
         <> RequestHandler.handleAddressChangedAtQueries @effs
         <> RequestHandler.handleCurrentSlotQueries @effs
@@ -199,7 +197,7 @@ stmRequestHandler = fmap sequence (wrapHandler (fmap pure nonBlockingRequests) <
     -- requests that wait for changes to happen
     blockingRequests =
         wrapHandler (processAwaitSlotRequestsSTM @effs)
-        <> wrapHandler (processTxConfirmedRequestsSTM @effs)
+        <> wrapHandler (processTxStatusChangeRequestsSTM @effs)
         <> processEndpointRequestsSTM @effs
 
 -- | Start the thread for the contract instance
@@ -247,7 +245,6 @@ type AppBackendConstraints t m effs =
     , Member (LogMsg (ContractInstanceMsg t)) effs
     , Member ChainIndexEffect effs
     , Member WalletEffect effs
-    , Member ContractRuntimeEffect effs
     , Member NodeClientEffect effs
     , Member (LogMsg RequestHandlerLogMsg) effs
     , Member (LogObserve (LogMessage Text.Text)) effs
@@ -306,7 +303,7 @@ updateState ContractResponse{newState = State{observableState}, hooks} = do
         InstanceState.clearEndpoints state
         forM_ hooks $ \r -> do
             case rqRequest r of
-                AwaitTxConfirmedReq txid -> InstanceState.addTransaction txid state
+                AwaitTxStatusChangeReq txid -> InstanceState.addTransaction txid state
                 UtxoAtReq addr -> InstanceState.addAddress addr state
                 AddressChangeReq AddressChangeRequest{acreqAddress} -> InstanceState.addAddress acreqAddress state
                 ExposeEndpointReq endpoint -> InstanceState.addEndpoint (r { rqRequest = endpoint}) state

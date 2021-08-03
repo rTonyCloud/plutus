@@ -38,7 +38,7 @@ let
         # While nixpkgs-fmt does exclude patterns specified in `.ignore` this
         # does not appear to work inside the hook. For now we have to thus
         # maintain excludes here *and* in `./.ignore` and *keep them in sync*.
-        excludes = [ ".*nix/pkgs/haskell/materialized.*/.*" ".*nix/sources.nix$" ".*/spago-packages.nix$" ".*/packages.nix$" ];
+        excludes = [ ".*nix/pkgs/haskell/materialized.*/.*" ".*/spago-packages.nix$" ".*/packages.nix$" ];
       };
       shellcheck.enable = true;
       png-optimization = {
@@ -51,17 +51,24 @@ let
     };
   };
 
+  nixFlakesAlias = pkgs.runCommand "nix-flakes-alias" { } ''
+    mkdir -p $out/bin
+    ln -sv ${pkgs.nixFlakes}/bin/nix $out/bin/nix-flakes
+  '';
+
   # build inputs from nixpkgs ( -> ./nix/default.nix )
   nixpkgsInputs = (with pkgs; [
     cacert
     ghcid
+    jq
     morph
-    niv
+    nixFlakesAlias
     nixpkgs-fmt
     nodejs
     shellcheck
     sqlite-interactive
     stack
+    yq
     z3
     zlib
   ] ++ (lib.optionals (!stdenv.isDarwin) [ rPackages.plotly R ]));

@@ -14,6 +14,7 @@ module PlutusTx.Builtins (
                                 , greaterThanByteString
                                 , sha2_256
                                 , sha3_256
+                                , blake2b_256
                                 , verifySignature
                                 , decodeUtf8
                                 -- * Integer builtins
@@ -99,6 +100,11 @@ sha2_256 b = fromBuiltin (BI.sha2_256 (toBuiltin b))
 -- | The SHA3-256 hash of a 'ByteString'
 sha3_256 :: ByteString -> ByteString
 sha3_256 b = fromBuiltin (BI.sha3_256 (toBuiltin b))
+
+{-# INLINABLE blake2b_256 #-}
+-- | The BLAKE2B-256 hash of a 'ByteString'
+blake2b_256 :: ByteString -> ByteString
+blake2b_256 b = fromBuiltin (BI.blake2b_256 (toBuiltin b))
 
 {-# INLINABLE verifySignature #-}
 -- | Verify that the signature is a signature of the message by the public key.
@@ -209,6 +215,7 @@ charToString c = BI.charToString (toBuiltin c)
 -- | Check if two strings are equal
 equalsString :: BuiltinString -> BuiltinString -> Bool
 equalsString x y = fromBuiltin (BI.equalsString x y)
+
 {-# INLINABLE trace #-}
 -- | Emit the given string as a trace message before evaluating the argument.
 trace :: BuiltinString -> a -> a
@@ -220,12 +227,12 @@ encodeUtf8 :: BuiltinString -> ByteString
 encodeUtf8 s = fromBuiltin (BI.encodeUtf8 s)
 
 matchList :: forall a r . BI.BuiltinList a -> r -> (a -> BI.BuiltinList a -> r) -> r
-matchList l nilCase consCase = BI.chooseList (\_ -> nilCase) (\_ -> consCase (BI.head l) (BI.tail l)) l ()
+matchList l nilCase consCase = BI.chooseList l (\_ -> nilCase) (\_ -> consCase (BI.head l) (BI.tail l)) ()
 
 {-# INLINABLE chooseData #-}
 -- | Given five values for the five different constructors of 'BuiltinData', selects
 -- one depending on which corresponds to the actual constructor of the given value.
-chooseData :: forall a . a -> a -> a -> a -> a -> BuiltinData -> a
+chooseData :: forall a . BuiltinData -> a -> a -> a -> a -> a -> a
 chooseData = BI.chooseData
 
 {-# INLINABLE mkConstr #-}
@@ -296,12 +303,12 @@ matchData
     -> r
 matchData d constrCase mapCase listCase iCase bCase =
    chooseData
+   d
    (\_ -> uncurry constrCase (unsafeDataAsConstr d))
    (\_ -> mapCase (unsafeDataAsMap d))
    (\_ -> listCase (unsafeDataAsList d))
    (\_ -> iCase (unsafeDataAsI d))
    (\_ -> bCase (unsafeDataAsB d))
-   d
    ()
 
 {-# INLINABLE matchData' #-}
@@ -317,10 +324,10 @@ matchData'
     -> r
 matchData' d constrCase mapCase listCase iCase bCase =
    chooseData
+   d
    (\_ -> let tup = BI.unsafeDataAsConstr d in constrCase (BI.fst tup) (BI.snd tup))
    (\_ -> mapCase (BI.unsafeDataAsMap d))
    (\_ -> listCase (BI.unsafeDataAsList d))
    (\_ -> iCase (unsafeDataAsI d))
    (\_ -> bCase (unsafeDataAsB d))
-   d
    ()

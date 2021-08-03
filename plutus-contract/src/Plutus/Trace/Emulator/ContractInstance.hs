@@ -31,21 +31,25 @@ module Plutus.Trace.Emulator.ContractInstance(
     ) where
 
 import           Control.Lens
-import           Control.Monad                        (guard, unless, void, when)
+import           Control.Monad                        (guard, join, unless, void, when)
 import           Control.Monad.Freer
-import           Control.Monad.Freer.Coroutine        (Yield)
 import           Control.Monad.Freer.Error            (Error, throwError)
 import           Control.Monad.Freer.Extras.Log       (LogMessage, LogMsg (..), LogObserve, logDebug, logError, logInfo,
                                                        logWarn, mapLog)
 import           Control.Monad.Freer.Extras.Modify    (raiseEnd)
 import           Control.Monad.Freer.Reader           (Reader, ask, runReader)
 import           Control.Monad.Freer.State            (State, evalState, get, gets, modify, put)
-import           Data.Aeson                           (object)
 import qualified Data.Aeson                           as JSON
 import           Data.Foldable                        (traverse_)
+import qualified Data.Map                             as Map
+import           Data.Maybe                           (listToMaybe, mapMaybe)
 import qualified Data.Text                            as T
+import           Ledger.Blockchain                    (OnChainTx (..))
+import           Ledger.Tx                            (txId)
 import           Plutus.Contract                      (Contract (..))
-import           Plutus.Contract.Effects              (PABReq, PABResp, matches)
+import           Plutus.Contract.Effects              (PABReq, PABResp (AwaitTxStatusChangeResp), TxValidity (..),
+                                                       matches)
+import qualified Plutus.Contract.Effects              as E
 import           Plutus.Contract.Resumable            (Request (..), Response (..))
 import qualified Plutus.Contract.Resumable            as State
 import           Plutus.Contract.Trace                (handleBlockchainQueries)
@@ -60,52 +64,19 @@ import           Plutus.Trace.Emulator.Types          (ContractConstraints, Cont
                                                        EmulatorRuntimeError (..), EmulatorThreads,
                                                        addEventInstanceState, emptyInstanceState, instanceIdThreads,
                                                        toInstanceState)
-import           Plutus.Trace.Scheduler               (AgentSystemCall, MessageCall (..), Priority (..), ThreadId,
-                                                       mkAgentSysCall)
+import           Plutus.Trace.Scheduler               (MessageCall (..), Priority (..), ThreadId, mkAgentSysCall)
 import qualified Wallet.API                           as WAPI
-import           Wallet.Effects                       (ChainIndexEffect, ContractRuntimeEffect (..), NodeClientEffect,
-                                                       WalletEffect)
+import           Wallet.Effects                       (ChainIndexEffect, NodeClientEffect, WalletEffect)
 import           Wallet.Emulator.LogMessages          (TxBalanceMsg)
-import           Wallet.Types                         (ContractInstanceId, EndpointDescription (..), EndpointValue (..),
-                                                       Notification (..), NotificationError (..))
+import           Wallet.Types                         (ContractInstanceId)
 
 -- | Effects available to threads that run in the context of specific
 --   agents (ie wallets)
 type ContractInstanceThreadEffs w s e effs =
     State (ContractInstanceStateInternal w s e ())
     ': Reader ContractInstanceId
-    ': ContractRuntimeEffect
     ': LogMsg ContractInstanceMsg
     ': EmulatorAgentThreadEffs effs
-
--- | Handle 'ContractRuntimeEffect' by sending the notification to the
---   receiving contract's thread
-handleContractRuntime ::
-    forall effs2.
-    ( Member (State EmulatorThreads) effs2
-    , Member (Yield (AgentSystemCall EmulatorMessage) (Maybe EmulatorMessage)) effs2
-    , Member (LogMsg ContractInstanceMsg) effs2
-    , Member (Reader ThreadId) effs2
-    )
-    => Eff (ContractRuntimeEffect ': effs2)
-    ~> Eff effs2
-handleContractRuntime = interpret $ \case
-    SendNotification n@Notification{notificationContractID} -> do
-        logInfo $ SendingNotification n
-        target <- gets (view $ instanceIdThreads . at notificationContractID)
-        case target of
-            Nothing -> do
-                let e = InstanceDoesNotExist notificationContractID
-                logWarn $ NotificationFailure e
-                pure $ Just e
-            Just threadId -> do
-                ownId <- ask @ThreadId
-                let Notification{notificationContractEndpoint=EndpointDescription ep, notificationContractArg} = n
-                    vl = JSON.toJSON $ Right @() $ object ["tag" JSON..= ep, "value" JSON..= EndpointValue notificationContractArg]
-                    e = Message threadId (EndpointCall ownId (EndpointDescription ep) vl)
-                _ <- mkAgentSysCall @_ @EmulatorMessage Normal e
-                logInfo $ NotificationSuccess n
-                pure Nothing
 
 -- | Start a new thread for a contract. Most of the work happens in
 --   'runInstance'.
@@ -123,7 +94,6 @@ contractThread :: forall w s e effs.
 contractThread ContractHandle{chInstanceId, chContract, chInstanceTag} = do
     ask @ThreadId >>= registerInstance chInstanceId
     interpret (mapLog (\m -> ContractInstanceLog m chInstanceId chInstanceTag))
-        $ handleContractRuntime
         $ runReader chInstanceId
         $ evalState (emptyInstanceState chContract)
         $ do
@@ -192,6 +162,9 @@ runInstance contract event = do
             Just (ContractInstanceStateRequest sender) -> do
                 handleObservableStateRequest sender
                 mkAgentSysCall Normal WaitForMessage >>= runInstance contract
+            Just (NewSlot block _) -> do
+                processNewTransactions @w @s @e (join block)
+                runInstance contract Nothing
             _ -> waitForNextMessage True >>= runInstance contract
 
 -- | Run an instance to only answer to observable state requests even when the
@@ -272,6 +245,31 @@ decodeEvent vl =
 getHooks :: forall w s e effs. Member (State (ContractInstanceStateInternal w s e ())) effs => Eff effs [Request PABReq]
 getHooks = gets @(ContractInstanceStateInternal w s e ()) (State.unRequests . view requests . view resumableResult . cisiSuspState)
 
+-- | Update the contract instance with tx status information from the new block.
+processNewTransactions ::
+    forall w s e effs.
+    ( Member (State (ContractInstanceStateInternal w s e ())) effs
+    , Member (LogMsg ContractInstanceMsg) effs
+    , Monoid w
+    )
+    => [OnChainTx]
+    -> Eff effs ()
+processNewTransactions txns = do
+    -- Check whether the contract instance is waiting for a status change of any
+    -- of the new transactions. If that is the case, call 'addResponse' to send the
+    -- response.
+    let txWithStatus (Invalid tx) = (txId tx, TxInvalid)
+        txWithStatus (Valid tx)   = (txId tx, TxValid)
+        statusMap = Map.fromList $ fmap txWithStatus txns
+    hks <- mapMaybe (traverse (preview E._AwaitTxStatusChangeReq)) <$> getHooks @w @s @e
+    let mpReq Request{rqID, itID, rqRequest=txid} =
+            case Map.lookup txid statusMap of
+                Nothing -> Nothing
+                Just newStatus -> Just Response{rspRqID=rqID, rspItID=itID, rspResponse=AwaitTxStatusChangeResp txid (E.Committed newStatus)}
+        txStatusHk = listToMaybe $ mapMaybe mpReq hks
+    traverse_ (addResponse @w @s @e) txStatusHk
+    logResponse @w @s @e False txStatusHk
+
 -- | Add a 'Response' to the contract instance state
 addResponse
     :: forall w s e effs.
@@ -289,7 +287,6 @@ addResponse e = do
 
 type ContractInstanceRequests effs =
         Reader ContractInstanceId
-         ': ContractRuntimeEffect
          ': EmulatedWalletEffects' effs
 
 -- | Respond to a specific event
@@ -297,7 +294,6 @@ respondToEvent ::
     forall w s e effs.
     ( Member (State (ContractInstanceStateInternal w s e ())) effs
     , Members EmulatedWalletEffects effs
-    , Member ContractRuntimeEffect effs
     , Member (Reader ContractInstanceId) effs
     , Member (LogMsg ContractInstanceMsg) effs
     , Monoid w
@@ -313,19 +309,18 @@ respondToEvent e = respondToRequest @w @s @e True $ RequestHandler $ \h -> do
 --   contract, if any.
 respondToRequest :: forall w s e effs.
     ( Member (State (ContractInstanceStateInternal w s e ())) effs
-    , Member ContractRuntimeEffect effs
     , Member (Reader ContractInstanceId) effs
     , Member (LogMsg ContractInstanceMsg) effs
     , Members EmulatedWalletEffects effs
     , Monoid w
     )
     => Bool -- ^ Flag on whether to log 'NoRequestsHandled' messages.
-    -> RequestHandler (Reader ContractInstanceId ': ContractRuntimeEffect ': EmulatedWalletEffects) PABReq PABResp
+    -> RequestHandler (Reader ContractInstanceId ': EmulatedWalletEffects) PABReq PABResp
     -- ^ How to respond to the requests.
     ->  Eff effs (Maybe (Response PABResp))
 respondToRequest isLogShowed f = do
     hks <- getHooks @w @s @e
-    let hdl :: (Eff (Reader ContractInstanceId ': ContractRuntimeEffect ': EmulatedWalletEffects) (Maybe (Response PABResp))) = tryHandler (wrapHandler f) hks
+    let hdl :: (Eff (Reader ContractInstanceId ': EmulatedWalletEffects) (Maybe (Response PABResp))) = tryHandler (wrapHandler f) hks
         hdl' :: (Eff (ContractInstanceRequests effs) (Maybe (Response PABResp))) = raiseEnd hdl
 
         response_ :: Eff effs (Maybe (Response PABResp)) =
@@ -337,7 +332,6 @@ respondToRequest isLogShowed f = do
                     $ subsume @NodeClientEffect
                     $ subsume @(Error WAPI.WalletAPIError)
                     $ subsume @WalletEffect
-                    $ subsume @ContractRuntimeEffect
                     $ subsume @(Reader ContractInstanceId) hdl'
     response <- response_
     traverse_ (addResponse @w @s @e) response

@@ -33,10 +33,10 @@ runTermBench :: String -> PlainTerm -> Benchmark
 runTermBench name term = env
     (do
         (_result, budget) <-
-          pure $ (unsafeEvaluateCek defaultCekParameters) term
+          pure $ (unsafeEvaluateCek noEmitter defaultCekParameters) term
         pure budget
         )
-    $ \_ -> bench name $ nf (unsafeEvaluateCek defaultCekParameters) term
+    $ \_ -> bench name $ nf (unsafeEvaluateCek noEmitter defaultCekParameters) term
 
 
 ---------------- Constructing PLC terms for benchmarking ----------------
@@ -316,11 +316,11 @@ benchNop3 gen =
    benchmark the functions on the right; the benchmarks take a long time to run,
    so this speeds things up a lot.
 
-   AddInteger:        SubtractInteger
-   DivideInteger:     RemainderInteger, QuotientInteger, ModInteger
-   LessThanInteger:   GreaterThanInteger
-   LessThanEqInteger: GreaterThanEqInteger
-   LessThanByteString:      GreaterThanByteString
+   AddInteger:            SubtractInteger
+   DivideInteger:         RemainderInteger, QuotientInteger, ModInteger
+   LessThanInteger:       GreaterThanInteger
+   LessThanEqualsInteger: GreaterThanEqualsInteger
+   LessThanByteString:    GreaterThanByteString
 -}
 main :: IO ()
 main = do
@@ -346,4 +346,3 @@ main = do
                                                       , LessThanByteString
                                                       ])
                       <> [benchVerifySignature]
-
