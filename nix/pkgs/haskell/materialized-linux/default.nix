@@ -1318,6 +1318,7 @@
           "http-media".components.library.planned = lib.mkOverride 900 true;
           "size-based".components.library.planned = lib.mkOverride 900 true;
           "psqueues".components.library.planned = lib.mkOverride 900 true;
+          "cardano-ledger-shelley-ma-test".components.library.planned = lib.mkOverride 900 true;
           "systemd".components.library.planned = lib.mkOverride 900 true;
           "cryptohash".components.library.planned = lib.mkOverride 900 true;
           "call-stack".components.library.planned = lib.mkOverride 900 true;
