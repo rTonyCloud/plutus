@@ -9,8 +9,9 @@ let
   # limit supportedSystems to what the CI can actually build
   # currently that is linux and darwin.
   systems = filterSystems supportedSystems;
-  crossSystems = let pkgs = (import ./default.nix {}).pkgs;
-                 in { inherit (pkgs.lib.systems.examples) mingwW64; };
+  crossSystems =
+    let pkgs = (import ./default.nix { }).pkgs;
+    in { inherit (pkgs.lib.systems.examples) mingwW64; };
 
   # Collects haskell derivations and builds an attrset:
   #

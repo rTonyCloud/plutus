@@ -16,7 +16,7 @@
 let
   inherit (pkgs) lib;
   cleanSrc = gitignore-nix.gitignoreSource src;
-  noCross = x: if pkgs.stdenv.hostPlatform == pkgs.stdenv.buildPlatform then x else {};
+  noCross = x: if pkgs.stdenv.hostPlatform == pkgs.stdenv.buildPlatform then x else { };
 in
 pkgs.recurseIntoAttrs {
   shellcheck = pkgs.callPackage ./shellcheck.nix { src = cleanSrc; };

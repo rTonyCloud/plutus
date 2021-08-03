@@ -20,8 +20,9 @@ let
     version = "2.6.2";
     plan-sha256 = lib.removeSuffix "\n" (builtins.readFile (
       if stdenv.hostPlatform.isWindows
-        then ./agda-windows.sha
-        else ./agda.sha));
+      then ./agda-windows.sha
+      else ./agda.sha
+    ));
     # Should use the index-state from the target cabal.project, but that disables plan-sha256. Fixed
     # in recent haskell.nix, delete the index-state passing when we update.
     inherit compiler-nix-name index-state checkMaterialization;

@@ -31,7 +31,7 @@ let
   inherit (pkgs) lib haskell-nix;
   inherit (plutus) haskell agdaPackages;
   inherit (plutus) easyPS sphinxcontrib-haddock;
-  noCross = x: if crossSystem == null then x else {};
+  noCross = x: if crossSystem == null then x else { };
 in
 rec {
   inherit pkgs plutus;
