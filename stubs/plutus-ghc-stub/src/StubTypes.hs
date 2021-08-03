@@ -1,14 +1,18 @@
-{-# LANGUAGE DeriveDataTypeable, DeriveFunctor, DeriveAnyClass, DataKinds, KindSignatures #-}
+{-# LANGUAGE DataKinds          #-}
+{-# LANGUAGE DeriveAnyClass     #-}
+{-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE DeriveFunctor      #-}
+{-# LANGUAGE KindSignatures     #-}
 module StubTypes where
 
-import Data.Data (Data)
-import Data.String (IsString(..))
-import Control.Monad
-import Control.Monad.IO.Class (MonadIO (..))
-import Data.Functor.Identity
-import Data.ByteString
-import qualified Control.Exception as Exception
-import qualified Language.Haskell.TH as TH
+import qualified Control.Exception      as Exception
+import           Control.Monad
+import           Control.Monad.IO.Class (MonadIO (..))
+import           Data.ByteString
+import           Data.Data              (Data)
+import           Data.Functor.Identity
+import           Data.String            (IsString (..))
+import qualified Language.Haskell.TH    as TH
 
 data DynFlags    = DynFlags_
 type FamInstEnvs = (FamInstEnv, FamInstEnv)
@@ -177,15 +181,15 @@ type Alt b = (AltCon, [b], Expr b)
 
 data ImpDeclSpec
     = ImpDeclSpec {
-          is_mod      :: ModuleName, -- ^ Module imported, e.g. @import Muggle@
+          is_mod  :: ModuleName, -- ^ Module imported, e.g. @import Muggle@
                                      -- Note the @Muggle@ may well not be
                                      -- the defining module for this thing!
 
                                      -- TODO: either should be Module, or there
                                      -- should be a Maybe UnitId here too.
-          is_as       :: ModuleName, -- ^ Import alias, e.g. from @as M@ (or @Muggle@ if there is no @as@ clause)
-          is_qual     :: Bool,       -- ^ Was this import qualified?
-          is_dloc     :: SrcSpan     -- ^ The location of the entire import declaration
+          is_as   :: ModuleName, -- ^ Import alias, e.g. from @as M@ (or @Muggle@ if there is no @as@ clause)
+          is_qual :: Bool,       -- ^ Was this import qualified?
+          is_dloc :: SrcSpan     -- ^ The location of the entire import declaration
       } deriving (Eq, Ord, Data)
 
 data ImpItemSpec
@@ -259,8 +263,8 @@ data CoreToDo           -- These are diff core-to-core passes,
 data GlobalRdrElt
   = GRE { gre_name :: Name
         , gre_par  :: Parent
-        , gre_lcl :: Bool          -- ^ True <=> the thing was defined locally
-        , gre_imp :: [ImportSpec]  -- ^ In scope through these imports
+        , gre_lcl  :: Bool          -- ^ True <=> the thing was defined locally
+        , gre_imp  :: [ImportSpec]  -- ^ In scope through these imports
     } deriving (Data, Eq)
 
 data Parent = Parent_ deriving (Eq, Data)

@@ -1,4 +1,5 @@
-{-# LANGUAGE CPP, Rank2Types #-}
+{-# LANGUAGE CPP        #-}
+{-# LANGUAGE Rank2Types #-}
 module Plugins (
       FrontendPlugin(..), defaultFrontendPlugin, FrontendPluginAction
     , Plugin(..), CommandLineOption, LoadedPlugin(..), lpModuleName
@@ -8,11 +9,11 @@ module Plugins (
     ) where
 
 
-import StubTypes
+import           Control.Monad
+import           Data.List
 import qualified Data.Semigroup
+import           StubTypes
 import qualified TcRnTypes
-import Control.Monad
-import Data.List
 
 plugins :: DynFlags -> [LoadedPlugin]
 plugins _ = []
@@ -81,9 +82,9 @@ data Plugin = Plugin {
 
 -- | A plugin with its arguments. The result of loading the plugin.
 data LoadedPlugin = LoadedPlugin {
-    lpPlugin :: Plugin
+    lpPlugin    :: Plugin
     -- ^ the actual callable plugin
-  , lpModule :: ModIface
+  , lpModule    :: ModIface
     -- ^ the module containing the plugin
   , lpArguments :: [CommandLineOption]
     -- ^ command line arguments for the plugin
@@ -96,16 +97,16 @@ lpModuleName = moduleName . mi_module . lpModule
 data PluginRecompile = ForceRecompile | NoForceRecompile | MaybeRecompile Fingerprint
 
 instance Outputable PluginRecompile where
-  ppr ForceRecompile = text "ForceRecompile"
-  ppr NoForceRecompile = text "NoForceRecompile"
+  ppr ForceRecompile      = text "ForceRecompile"
+  ppr NoForceRecompile    = text "NoForceRecompile"
   ppr (MaybeRecompile fp) = text "MaybeRecompile" <+> ppr fp
 
 instance Semigroup PluginRecompile where
-  ForceRecompile <> _ = ForceRecompile
-  NoForceRecompile <> r = r
+  ForceRecompile <> _                     = ForceRecompile
+  NoForceRecompile <> r                   = r
   MaybeRecompile fp <> NoForceRecompile   = MaybeRecompile fp
   MaybeRecompile fp <> MaybeRecompile fp' = MaybeRecompile (fingerprintFingerprints [fp, fp'])
-  MaybeRecompile _fp <> ForceRecompile     = ForceRecompile
+  MaybeRecompile _fp <> ForceRecompile    = ForceRecompile
 
 instance Monoid PluginRecompile where
   mempty = NoForceRecompile
